@@ -126,6 +126,10 @@ wie Snapchat es anzeigt). Ohne Entscheidung wird diese Memory nicht verarbeitet 
 - mit Overlay: Overlay wird eingebrannt, Kodierung **HEVC (H.265) über NVENC** (Fallback `libx265`), mit
   Apple-kompatiblem `hvc1`-Tag; Ton wird unverändert übernommen, Drehung (Hochkant-Videos) korrekt berücksichtigt,
   Dauer wird nach dem Encoding geprüft.
+- Sonderfall **Zeitraffer**: Einige Snapchat-Videos bestehen aus wenigen Bildern über mehrere Minuten plus einer
+  Edit-Liste mit vielen 1/30-s-Segmenten. ffmpeg löst diese beim Neukodieren falsch auf (Dauerprüfung schlägt an);
+  snapmem setzt die Bildfolge dann selbst exakt nach den Segmenten zusammen.
+- Hinweis: Hauptdatei und Overlay einer Memory können in **verschiedenen Zips** liegen – wird berücksichtigt.
 
 ### Duplikate
 Snapchat-Exporte enthalten Memories mehrfach (erneutes Speichern → gleicher Inhalt, späteres Datum).
