@@ -13,3 +13,4 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 _test_output/
+_test_work/

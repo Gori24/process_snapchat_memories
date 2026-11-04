@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>snapmem Review</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root { --bg:#f6f6f4; --panel:#fff; --text:#1d1d1f; --muted:#6b6b70; --line:#dedede; --accent:#0a7cff;
+          --ok:#1f9d55; --warn:#d97706; --sel:#e8f1ff; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#151517; --panel:#1f1f22; --text:#ececee; --muted:#9a9aa2; --line:#333338; --accent:#4c9dff;
+            --ok:#34c26f; --warn:#f0a43a; --sel:#1d2b40; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 "Segoe UI", system-ui, sans-serif; background:var(--bg); color:var(--text);
+         display:grid; grid-template-columns: 300px 1fr; height:100vh; }
+  aside { border-right:1px solid var(--line); background:var(--panel); overflow:auto; }
+  aside header { padding:14px 16px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--panel); }
+  aside h1 { font-size:16px; margin:0 0 4px; }
+  .progress { color:var(--muted); font-size:13px; }
+  .item { padding:10px 16px; border-bottom:1px solid var(--line); cursor:pointer; display:flex; gap:8px; align-items:flex-start; }
+  .item:hover { background:var(--sel); }
+  .item.active { background:var(--sel); box-shadow: inset 3px 0 0 var(--accent); }
+  .dot { width:10px; height:10px; border-radius:50%; background:var(--warn); margin-top:5px; flex:none; }
+  .dot.done { background:var(--ok); }
+  .item small { color:var(--muted); display:block; }
+  main { overflow:auto; padding:20px 24px 40px; }
+  h2 { margin:0 0 4px; font-size:18px; }
+  .meta { color:var(--muted); margin-bottom:16px; }
+  .section { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:18px; }
+  .section h3 { margin:0 0 10px; font-size:15px; }
+  .loc-grid { display:grid; grid-template-columns: minmax(220px, 340px) 1fr; gap:16px; }
+  .preview img, .preview video { width:100%; border-radius:8px; border:1px solid var(--line); background:#000; }
+  #map { height:460px; border-radius:8px; border:1px solid var(--line); }
+  .btns { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+  button { font:inherit; padding:7px 12px; border-radius:7px; border:1px solid var(--line); background:var(--panel);
+           color:var(--text); cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button.chosen { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .hint { color:var(--muted); font-size:13px; margin-top:8px; }
+  .fits { display:grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap:12px; }
+  .fit { border:2px solid var(--line); border-radius:10px; padding:8px; cursor:pointer; text-align:center; background:var(--panel); }
+  .fit img { width:100%; border-radius:6px; background:#000; min-height:120px; }
+  .fit.chosen { border-color:var(--accent); background:var(--sel); }
+  .fit .lbl { margin-top:6px; font-weight:600; }
+  .status { margin-top:10px; font-weight:600; }
+  .status.done { color:var(--ok); } .status.open { color:var(--warn); }
+  .finish { margin-top:10px; width:100%; }
+  .num-icon { background:#e11d48; color:#fff; border-radius:50%; width:26px !important; height:26px !important;
+              display:flex; align-items:center; justify-content:center; font-weight:700; border:2px solid #fff; }
+  .ctx-icon { background:#64748b; border-radius:50%; border:2px solid #fff; }
+  .sel-icon { background:#16a34a; border-radius:50%; border:3px solid #fff; box-shadow:0 0 0 2px #16a34a; }
+  @media (max-width: 900px) { body { grid-template-columns: 1fr; height:auto; } aside { max-height:40vh; }
+    .loc-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<aside>
+  <header>
+    <h1>snapmem – Konflikte</h1>
+    <div class="progress" id="progress">lade …</div>
+    <button class="finish" id="finish" title="Server beenden und zur Konsole zurückkehren">Fertig – Review beenden</button>
+  </header>
+  <div id="list"></div>
+</aside>
+<main id="main"><p>Lade …</p></main>
+
+<script>
+let state = null, current = null, map = null, layers = [];
+
+const $ = (s, el=document) => el.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function isDone(it) {
+  return it.types.every(t => t === 'location' ? it.decision.location !== undefined && it.decision.location !== null
+                                               : !!it.decision.fit);
+}
+function distM(a, b) {
+  const R = 6371000, r = x => x * Math.PI / 180;
+  const h = Math.sin(r(b[0]-a[0])/2)**2 + Math.cos(r(a[0]))*Math.cos(r(b[0]))*Math.sin(r(b[1]-a[1])/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+async function load() {
+  state = await (await fetch('/api/state')).json();
+  renderList();
+  if (state.items.length) select(current ? current.id : (state.items.find(i => !isDone(i)) || state.items[0]).id);
+}
+function renderList() {
+  const done = state.items.filter(isDone).length;
+  $('#progress').textContent = `${done} von ${state.items.length} entschieden`;
+  $('#list').innerHTML = state.items.map(it => `
+    <div class="item ${current && current.id === it.id ? 'active' : ''}" data-id="${esc(it.id)}">
+      <span class="dot ${isDone(it) ? 'done' : ''}"></span>
+      <div>${esc(it.utc)}<small>${it.kind === 'image' ? 'Bild' : 'Video'} · ${it.types.map(t => t === 'location' ? 'Standort' : 'Overlay-Format').join(' + ')}</small></div>
+    </div>`).join('');
+  document.querySelectorAll('.item').forEach(el => el.onclick = () => select(el.dataset.id));
+}
+async function decide(payload) {
+  const r = await fetch('/api/decision', {method:'POST', headers:{'Content-Type':'application/json'},
+                                          body: JSON.stringify({id: current.id, ...payload})});
+  const j = await r.json();
+  if (!r.ok) { alert('Fehler: ' + j.error); return; }
+  current.decision = {location: j.decision.location, fit: j.decision.fit};
+  renderList(); select(current.id);
+}
+function select(id) {
+  if (map) { map.remove(); map = null; }
+  current = state.items.find(i => i.id === id);
+  renderList();
+  const it = current, d = it.decision;
+  let html = `<h2>${it.kind === 'image' ? 'Bild' : 'Video'} vom ${esc(it.utc)}</h2>
+    <div class="meta">ID ${esc(it.id)}${it.notes.length ? ' · ' + esc(it.notes.join(' | ')) : ''}</div>`;
+  if (it.types.includes('location')) {
+    const cands = it.candidates.filter(Boolean);
+    const spread = cands.length > 1 ? Math.round(distM(cands[0], cands[1])) : 0;
+    const media = it.kind === 'video'
+      ? `<video src="/api/media/${esc(it.id)}" controls preload="metadata" poster="/api/preview/${esc(it.id)}.jpg"></video>`
+      : `<img src="/api/preview/${esc(it.id)}.jpg" alt="Vorschau">`;
+    const loc = d.location;
+    html += `<div class="section"><h3>Standort wählen</h3>
+      <p class="hint" style="margin-top:0">Snapchat hat für diesen Zeitpunkt ${it.candidates.length} verschiedene Orte gespeichert
+      (Abstand ca. ${spread} m). Rote Zahlen = Kandidaten, graue Punkte = andere Memories in ±6 h (Tooltip zeigt den Zeitabstand).
+      Klick in die Karte setzt einen eigenen Punkt.</p>
+      <div class="loc-grid"><div class="preview">${media}</div><div id="map"></div></div>
+      <div class="btns">
+        ${it.candidates.map((c, i) => c ? `<button data-cand="${i}" class="${loc && !loc.none && Math.abs(loc.lat-c[0])<1e-7 && Math.abs(loc.lon-c[1])<1e-7 ? 'chosen':''}">Kandidat ${i+1} (${c[0].toFixed(5)}, ${c[1].toFixed(5)})</button>` : `<button data-cand="${i}">Kandidat ${i+1}: kein Ort</button>`).join('')}
+        ${cands.length > 1 ? `<button id="mid">Mittelpunkt</button>` : ''}
+        <button id="nogps" class="${loc && loc.none ? 'chosen' : ''}">Kein Standort</button>
+        <button id="undo-loc">Entscheidung zurücksetzen</button>
+      </div>
+      <div class="status ${loc ? 'done' : 'open'}">${loc ? (loc.none ? 'Entschieden: kein Standort' :
+          `Entschieden: ${loc.lat.toFixed(6)}, ${loc.lon.toFixed(6)} ${loc.label ? '(' + esc(loc.label) + ')' : ''}`) : 'Noch offen'}</div>
+    </div>`;
+  }
+  if (it.types.includes('fit')) {
+    html += `<div class="section"><h3>Overlay-Anpassung wählen</h3>
+      <p class="hint" style="margin-top:0">Medium ${it.main_size.join('×')}, Overlay ${(it.overlay_size||[]).join('×')}
+      (Abweichung Seitenverhältnis ${(it.aspect_dev*100).toFixed(1)} %).</p>
+      <div class="fits">${state.fit_modes.map(f => `
+        <div class="fit ${d.fit === f.id ? 'chosen' : ''}" data-fit="${f.id}">
+          <img loading="lazy" src="/api/preview/${esc(it.id)}.jpg?fit=${f.id}" alt="${esc(f.label)}">
+          <div class="lbl">${esc(f.label)}</div></div>`).join('')}</div>
+      <div class="status ${d.fit ? 'done' : 'open'}">${d.fit ? 'Entschieden: ' + esc(state.fit_modes.find(f => f.id === d.fit).label) : 'Noch offen (Standard wäre D – Letterbox)'}</div>
+    </div>`;
+  }
+  const idx = state.items.indexOf(it);
+  html += `<div class="btns"><button id="prev" ${idx === 0 ? 'disabled' : ''}>← Vorheriger</button>
+           <button id="next" ${idx === state.items.length - 1 ? 'disabled' : ''}>Nächster →</button></div>`;
+  $('#main').innerHTML = html;
+
+  if (it.types.includes('location')) {
+    initMap(it);
+    document.querySelectorAll('[data-cand]').forEach(b => b.onclick = () => {
+      const c = it.candidates[+b.dataset.cand];
+      decide({location: c ? {lat: c[0], lon: c[1], label: 'Kandidat ' + (+b.dataset.cand + 1)} : {none: true}});
+    });
+    const mid = $('#mid');
+    if (mid) mid.onclick = () => {
+      const cs = it.candidates.filter(Boolean);
+      decide({location: {lat: cs.reduce((s, c) => s + c[0], 0) / cs.length,
+                         lon: cs.reduce((s, c) => s + c[1], 0) / cs.length, label: 'Mittelpunkt'}});
+    };
+    $('#nogps').onclick = () => decide({location: {none: true}});
+    $('#undo-loc').onclick = () => decide({location: null});
+  }
+  document.querySelectorAll('[data-fit]').forEach(el => el.onclick = () => decide({fit: el.dataset.fit}));
+  $('#prev').onclick = () => select(state.items[idx - 1].id);
+  $('#next').onclick = () => select(state.items[idx + 1].id);
+}
+function initMap(it) {
+  if (typeof L === 'undefined') { $('#map').innerHTML = '<p class="hint" style="padding:12px">Karte nicht verfügbar (offline?). Kandidaten-Buttons funktionieren trotzdem.</p>'; return; }
+  map = L.map('map');
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+              {maxZoom: 19, attribution: '© OpenStreetMap-Mitwirkende'}).addTo(map);
+  const pts = [];
+  it.context.forEach(c => {
+    const m = L.marker([c.lat, c.lon], {icon: L.divIcon({className: 'ctx-icon', iconSize: [12, 12]})}).addTo(map);
+    const dir = c.delta_min >= 0 ? '+' : '−';
+    m.bindTooltip(`${c.kind === 'image' ? 'Bild' : 'Video'} ${dir}${Math.abs(c.delta_min)} min<br>${c.time}`);
+    pts.push([c.lat, c.lon]);
+  });
+  it.candidates.forEach((c, i) => {
+    if (!c) return;
+    L.marker(c, {icon: L.divIcon({className: 'num-icon', html: String(i + 1), iconSize: [26, 26]})})
+      .addTo(map).bindTooltip(`Kandidat ${i + 1}`).on('click', () =>
+        decide({location: {lat: c[0], lon: c[1], label: 'Kandidat ' + (i + 1)}}));
+    pts.push(c);
+  });
+  const loc = it.decision.location;
+  if (loc && !loc.none) {
+    L.marker([loc.lat, loc.lon], {icon: L.divIcon({className: 'sel-icon', iconSize: [16, 16]}), zIndexOffset: 1000})
+      .addTo(map).bindTooltip('Gewählt');
+  }
+  const candPts = it.candidates.filter(Boolean);
+  const fit = () => {
+    map.invalidateSize();
+    if (candPts.length) map.fitBounds(L.latLngBounds(candPts).pad(1.5), {maxZoom: 17});
+    else if (pts.length) map.fitBounds(L.latLngBounds(pts).pad(0.3));
+    else map.setView([48, 10], 5);
+  };
+  map.setView(candPts[0] || pts[0] || [48, 10], 14);
+  // erst nach dem Layout zoomen – vorher hat der Container noch keine endgültige Größe
+  requestAnimationFrame(() => setTimeout(fit, 0));
+  map.on('click', e => {
+    if (confirm(`Eigenen Standort ${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)} setzen?`))
+      decide({location: {lat: e.latlng.lat, lon: e.latlng.lng, label: 'eigener Punkt'}});
+  });
+}
+$('#finish').onclick = async () => {
+  const open = state.items.filter(i => !isDone(i)).length;
+  if (open && !confirm(`${open} Konflikt(e) noch offen. Trotzdem beenden?`)) return;
+  await fetch('/api/shutdown', {method: 'POST', body: '{}'});
+  document.body.innerHTML = '<main><h2>Review beendet</h2><p>Entscheidungen gespeichert. Weiter in der Konsole mit <code>python -m snapmem run</code>.</p></main>';
+};
+document.addEventListener('keydown', e => {
+  if (!state || e.target.tagName === 'INPUT') return;
+  const idx = state.items.indexOf(current);
+  if (e.key === 'ArrowDown' && idx < state.items.length - 1) select(state.items[idx + 1].id);
+  if (e.key === 'ArrowUp' && idx > 0) select(state.items[idx - 1].id);
+});
+load();
+</script>
+</body>
+</html>
