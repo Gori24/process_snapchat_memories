@@ -67,6 +67,19 @@ def test_letterbox():
     assert aspect_deviation((1242, 1656), (1179, 2097)) > 0.3
 
 
+def test_editlist_timelapse_sequence():
+    from snapmem.media.videos import EditList, build_frame_sequence, is_complex_editlist
+    # Zeitraffer wie im echten Export: Rohbilder alle 1.2 s, Segmente zu je 1/30 s auf steigende Medienzeiten
+    pts = [i * 1.2 for i in range(10)]
+    el = EditList(600, 600, [(20, 700, 1.0), (20, 1420, 1.0), (40, 2140, 1.0), (20, 5000, 1.0)])
+    assert is_complex_editlist(el) and abs(el.duration - 100 / 600) < 1e-9
+    seq = build_frame_sequence(el, pts, 30)
+    # 700/600=1.17s -> Bild 0 (0.0s); 1420/600=2.37s -> Bild 1 (1.2s);
+    # Segment 3 (2 Frames) spielt ab 3.567s: 3.583s -> Bild 2 (2.4s), 3.617s -> Bild 3 (3.6s); 8.33s -> Bild 6 (7.2s)
+    assert seq == [0, 1, 2, 3, 6]
+    assert not is_complex_editlist(EditList(600, 600, [(800, 0, 1.0)]))
+
+
 def test_metadata_args_timezone_and_gps():
     a = image_args(1793370013, "Europe/Berlin", -4.268673, 39.595848)
     assert "-EXIF:DateTimeOriginal=2026:10:30 15:20:13" in a

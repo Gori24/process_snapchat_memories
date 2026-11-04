@@ -23,7 +23,8 @@ from snapmem.catalog import (CONFLICT_FIT, CONFLICT_LOCATION, Catalog, Memory, a
 from snapmem.config import Settings
 from snapmem.media.images import composite_image, encode_jpeg
 from snapmem.media.overlay import load_overlay
-from snapmem.media.videos import burn_overlay, prepare_overlay_png, probe_duration
+from snapmem.media.videos import (burn_overlay, burn_overlay_editlist, is_complex_editlist, prepare_overlay_png,
+                                  probe_duration, read_video_editlist)
 from snapmem.metadata import ExifToolPool, set_file_times, write_metadata
 
 log = logging.getLogger(__name__)
@@ -97,6 +98,11 @@ class Manifest:
 
 # ---------------------------------------------------------------- Einzelverarbeitung
 
+def _durations_match(d_in: float, d_out: float) -> bool:
+    return abs(d_in - d_out) <= max(0.5, d_in * 0.05)
+
+
+
 @dataclass
 class Result:
     id: str
@@ -115,7 +121,7 @@ def process_one(m: Memory, s: Settings, pool: ExifToolPool, video_sem: threading
     detail = []
     try:
         main_bytes = er.read_bytes(m.zip_path, m.main_name)
-        layers = load_overlay(er.read_bytes(m.zip_path, m.overlay_name)) if m.has_overlay else None
+        layers = load_overlay(m.read_overlay_bytes()) if m.has_overlay else None
         out = tmp / ("out" + Path(m.output_name).suffix)
 
         if m.kind == "image":
@@ -141,8 +147,17 @@ def process_one(m: Memory, s: Settings, pool: ExifToolPool, video_sem: threading
                 canvas = prepare_overlay_png(layers, display, m.fit, ov_png)
                 with video_sem:
                     enc = burn_overlay(src, ov_png, out, display, canvas, m.fit, s)
-                d_in, d_out = probe_duration(src), probe_duration(out)
-                if d_in and d_out and abs(d_in - d_out) > max(0.5, d_in * 0.05):
+                    d_in, d_out = probe_duration(src), probe_duration(out)
+                    if d_in and d_out and not _durations_match(d_in, d_out):
+                        el = read_video_editlist(src)
+                        if not is_complex_editlist(el):
+                            raise RuntimeError(f"Dauer weicht ab: Quelle {d_in:.2f}s, Ergebnis {d_out:.2f}s")
+                        log.info("%s: Dauer %.2fs != %.2fs, Video hat Edit-Liste mit %d Segmenten -> löse sie auf",
+                                 m.id, d_out, d_in, len(el.segments))
+                        out.unlink(missing_ok=True)
+                        enc = burn_overlay_editlist(src, ov_png, out, display, canvas, m.fit, s, el)
+                        d_out = probe_duration(out)
+                if d_in and d_out and not _durations_match(d_in, d_out):
                     raise RuntimeError(f"Dauer weicht ab: Quelle {d_in:.2f}s, Ergebnis {d_out:.2f}s")
                 detail.append(f"Overlay eingebrannt mit {enc}, {canvas[0]}x{canvas[1]}, "
                               f"Dauer {d_in}s -> {d_out}s, fit={m.fit}")

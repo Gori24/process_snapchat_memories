@@ -51,7 +51,9 @@ def test_catalog(settings):
     assert old.date_source == "embedded_video" and old.lat is None
     assert old.output_name.startswith("2022-05-14_15-38-56")  # Sommerzeit Berlin
 
-    assert mem(cat, UUID_SCOF).overlay_format == "scof" and mem(cat, UUID_SCOF).lat is None
+    sc = mem(cat, UUID_SCOF)
+    assert sc.overlay_format == "scof" and sc.lat is None
+    assert sc.overlay_zip != sc.zip_path  # Overlay aus anderem Zip
     assert CONFLICT_FIT in mem(cat, UUID_LETTER).pending_conflicts
     amb = mem(cat, UUID_AMBIG)
     assert CONFLICT_LOCATION in amb.pending_conflicts and len(amb.location_candidates) == 2

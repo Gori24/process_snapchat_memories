@@ -39,6 +39,7 @@ class Memory:
     main_size: list[int]              # Anzeigegröße (nach Rotation)
     utc_ts: int                       # Snapchat-Datum (JSON == Zip-Zeitstempel)
     overlay_name: str | None = None
+    overlay_zip: str | None = None     # kann in einem anderen Zip liegen als die Hauptdatei!
     overlay_sig: str | None = None
     overlay_format: str | None = None  # png | webp | scof
     overlay_size: list[int] | None = None
@@ -72,6 +73,9 @@ class Memory:
     @property
     def has_overlay(self) -> bool:
         return self.overlay_name is not None
+
+    def read_overlay_bytes(self) -> bytes:
+        return er.read_bytes(self.overlay_zip or self.zip_path, self.overlay_name)
 
     @property
     def is_active(self) -> bool:
@@ -279,7 +283,9 @@ def build_catalog(settings: Settings, decisions: Decisions | None = None) -> Cat
                 mem.notes.append(f"Overlay unlesbar: {op.get('error')} – wird ignoriert")
                 log.warning("%s: Overlay unlesbar (%s) – wird ignoriert", gid, op.get("error"))
             else:
-                mem.overlay_name, mem.overlay_sig = oz.name, oz.sig
+                mem.overlay_name, mem.overlay_zip, mem.overlay_sig = oz.name, oz.zip_path, oz.sig
+                if oz.zip_path != mz.zip_path:
+                    mem.notes.append(f"Overlay liegt in {Path(oz.zip_path).name}")
                 mem.overlay_format, mem.overlay_size = op["fmt"], op["size"]
                 if op.get("has_replacement"):
                     mem.notes.append("SCOF mit Lens-Ebene: ersetzt das Foto")

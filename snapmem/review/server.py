@@ -122,7 +122,7 @@ class ReviewApp:
             im = Image.open(tmp / "f.png")
             im.load()
         if m.has_overlay:
-            layers = load_overlay(er.read_bytes(m.zip_path, m.overlay_name))
+            layers = load_overlay(m.read_overlay_bytes())
             im = composite_image(im, layers, fit or m.fit)
         im = im.convert("RGB")
         im.thumbnail((900, 900))

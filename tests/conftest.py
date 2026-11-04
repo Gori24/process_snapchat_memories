@@ -117,8 +117,9 @@ def export_dir(tmp_path_factory) -> Path:
         add(zf, f"memories/2025-07-02_{UUID_IMG_OV}-main.jpg", img_ov_main, t_img_ov)
         add(zf, f"memories/2025-07-02_{UUID_IMG_OV}-overlay.png", img_ov_ov, t_img_ov)
         add(zf, f"memories/2018-08-09_{UUID_SCOF}-main.jpg", jpeg((300, 534), (10, 10, 10)), t_scof)
-        add(zf, f"memories/2018-08-09_{UUID_SCOF}-overlay.png", scof((300, 534), (288, 512)), t_scof)
     with zipfile.ZipFile(inp / "mydata~123-2.zip", "w") as zf:
+        # Overlay liegt in einem anderen Zip als die Hauptdatei (kommt im echten Export vor)
+        add(zf, f"memories/2018-08-09_{UUID_SCOF}-overlay.png", scof((300, 534), (288, 512)), t_scof)
         add(zf, f"memories/2026-01-05_{UUID_IMG_OV}-main.jpg", img_ov_main, t_dup)
         add(zf, f"memories/2026-01-05_{UUID_IMG_OV}-overlay.png", img_ov_ov, t_dup)
         add(zf, f"memories/2025-10-25_{UUID_VID_OV}-main.mp4",
