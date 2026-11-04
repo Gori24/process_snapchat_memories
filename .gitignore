@@ -1,0 +1,15 @@
+# Persönliche Daten – niemals committen
+input/
+output/
+work/
+reports/
+logs/
+_analyse/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+_test_output/

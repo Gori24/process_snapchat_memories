@@ -1,0 +1,6 @@
+pillow==13.0.0
+imageio-ffmpeg==0.8.1
+timezonefinder==9.2.0
+tzdata==2026.6
+PyExifTool==0.5.6
+pytest==9.2.0
